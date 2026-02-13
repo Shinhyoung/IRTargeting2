@@ -232,10 +232,10 @@ int main(int argc, char* argv[])
     int frameHeight = camera->Height();
     frameWidthGlobal = frameWidth;  // 전역 변수에 저장 (마우스 콜백에서 사용)
 
-    // ========== 모션 감지 변수 ==========
+    // ========== 모션 감지 변수 (주석 처리) ==========
     // 이전 프레임의 중심점들을 저장하여 움직임 감지
-    std::vector<cv::Point> previousCenters;
-    const int MOTION_THRESHOLD = 10;  // 10픽셀 이상 움직여야 "움직이는 객체"로 판단
+    // std::vector<cv::Point> previousCenters;
+    // const int MOTION_THRESHOLD = 10;  // 10픽셀 이상 움직여야 "움직이는 객체"로 판단
 
     std::cout << "Instructions:" << std::endl;
     std::cout << "1. Click 4 points on the LEFT image in order: lefttop, righttop, rightbottom, leftbottom" << std::endl;
@@ -293,7 +293,7 @@ int main(int argc, char* argv[])
 
                 // ===== 중심점 계산 및 표시 =====
                 // 현재 프레임에서 검출된 중심점들을 저장
-                std::vector<cv::Point> currentCenters;
+                // std::vector<cv::Point> currentCenters;  // 모션 감지 비활성화로 주석 처리
 
                 // 각 윤곽선에 대해 중심점 계산
                 for (const auto& contour : contours)
@@ -310,11 +310,12 @@ int main(int argc, char* argv[])
                         int cx = static_cast<int>(m.m10 / m.m00);
                         int cy = static_cast<int>(m.m01 / m.m00);
                         cv::Point center(cx, cy);
-                        currentCenters.push_back(center);
+                        // currentCenters.push_back(center);  // 모션 감지 비활성화로 주석 처리
 
-                        // ===== 움직임 감지 =====
+                        // ===== 움직임 감지 (주석 처리) =====
                         // 이전 프레임의 중심점들과 비교하여 움직임 판단
                         // 10픽셀 이상 이동했으면 "움직이는 객체"로 판단
+                        /*
                         bool isMoving = true;
                         for (const auto& prevCenter : previousCenters)
                         {
@@ -327,10 +328,11 @@ int main(int argc, char* argv[])
                                 break;
                             }
                         }
+                        */
 
-                        // ===== 움직이는 객체만 표시 =====
-                        // 정적인 객체는 표시하지 않음 (배경 노이즈 제거)
-                        if (isMoving)
+                        // ===== 모든 객체 표시 (모션 감지 비활성화) =====
+                        // 정적/동적 구분 없이 모든 객체의 좌표 표시
+                        // if (isMoving)  // 주석 처리: 모든 객체 표시
                         {
                             // 중심점에 빨간색 원 그리기
                             // Scalar(B, G, R) - OpenCV는 BGR 순서 사용
@@ -344,9 +346,9 @@ int main(int argc, char* argv[])
                     }
                 }
 
-                // ===== 이전 프레임 정보 업데이트 =====
+                // ===== 이전 프레임 정보 업데이트 (주석 처리) =====
                 // 다음 프레임의 움직임 감지를 위해 현재 중심점들 저장
-                previousCenters = currentCenters;
+                // previousCenters = currentCenters;  // 모션 감지 비활성화로 주석 처리
 
                 // ===== 선택된 점 표시 =====
                 // 사용자가 클릭한 점들을 grayscale 이미지에 표시
