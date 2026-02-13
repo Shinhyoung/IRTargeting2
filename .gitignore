@@ -1,0 +1,40 @@
+# Build directories
+build/
+out/
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.sln
+
+# Log files
+*.log
+*_log.txt
+IRViewer_log.txt
+
+# Executables
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+
+# IDE specific
+.vscode/.cmaketools.json
+.vscode/cmake-variants.json
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Windows
+Thumbs.db
+Desktop.ini
