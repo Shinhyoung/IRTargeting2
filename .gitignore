@@ -38,3 +38,10 @@ cmake_install.cmake
 # Windows
 Thumbs.db
 Desktop.ini
+
+# Claude memory and temp files
+.claude/
+nul
+
+# Sample code folders
+IRViewer/
