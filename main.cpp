@@ -295,6 +295,9 @@ int main(int argc, char* argv[])
                 // 현재 프레임에서 검출된 중심점들을 저장
                 // std::vector<cv::Point> currentCenters;  // 모션 감지 비활성화로 주석 처리
 
+                // 호모그래피 변환을 위한 중심점 저장 (cv::Point2f 타입)
+                std::vector<cv::Point2f> detectedCenters;
+
                 // 각 윤곽선에 대해 중심점 계산
                 for (const auto& contour : contours)
                 {
@@ -311,6 +314,9 @@ int main(int argc, char* argv[])
                         int cy = static_cast<int>(m.m01 / m.m00);
                         cv::Point center(cx, cy);
                         // currentCenters.push_back(center);  // 모션 감지 비활성화로 주석 처리
+
+                        // 호모그래피 변환을 위해 중심점 저장
+                        detectedCenters.push_back(cv::Point2f(cx, cy));
 
                         // ===== 움직임 감지 (주석 처리) =====
                         // 이전 프레임의 중심점들과 비교하여 움직임 판단
@@ -399,8 +405,39 @@ int main(int argc, char* argv[])
                     cv::warpPerspective(grayFrame, warpedImage, homographyMatrix,
                                         cv::Size(1024, 768));
 
-                    // 새 창에 표시
-                    cv::imshow("Warped View (1024x768)", warpedImage);
+                    // Warped 이미지를 컬러로 변환 (점과 텍스트 표시를 위해)
+                    cv::Mat warpedColor;
+                    cv::cvtColor(warpedImage, warpedColor, cv::COLOR_GRAY2BGR);
+
+                    // 검출된 중심점들을 호모그래피 변환
+                    if (!detectedCenters.empty())
+                    {
+                        std::vector<cv::Point2f> transformedCenters;
+                        cv::perspectiveTransform(detectedCenters, transformedCenters, homographyMatrix);
+
+                        // 변환된 좌표를 warped 이미지에 표시
+                        for (size_t i = 0; i < transformedCenters.size(); i++)
+                        {
+                            // 변환된 좌표가 이미지 범위 내에 있는지 확인
+                            if (transformedCenters[i].x >= 0 && transformedCenters[i].x < 1024 &&
+                                transformedCenters[i].y >= 0 && transformedCenters[i].y < 768)
+                            {
+                                // 중심점에 빨간색 원 그리기
+                                cv::circle(warpedColor, transformedCenters[i], 5, cv::Scalar(0, 0, 255), -1);
+
+                                // 좌표 텍스트를 초록색으로 표시
+                                int tx = static_cast<int>(transformedCenters[i].x);
+                                int ty = static_cast<int>(transformedCenters[i].y);
+                                std::string coordText = "(" + std::to_string(tx) + "," + std::to_string(ty) + ")";
+                                cv::putText(warpedColor, coordText,
+                                            cv::Point(tx + 10, ty - 5),
+                                            cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 255, 0), 1);
+                            }
+                        }
+                    }
+
+                    // 새 창에 표시 (좌표가 표시된 컬러 이미지)
+                    cv::imshow("Warped View (1024x768)", warpedColor);
                 }
             }
         }
