@@ -7,6 +7,7 @@
  * - Morphological dilation을 통한 노이즈 제거 및 객체 강조
  * - 이진화(Threshold)를 통한 밝은 객체 검출
  * - 움직이는 객체만 추적하여 좌표 표시 (정적인 객체 필터링)
+ * - 마우스 클릭으로 관심 영역(ROI) 선택 및 호모그래피 변환
  * - OpenCV를 사용한 실시간 영상 표시 및 시각화
  */
 
@@ -21,6 +22,51 @@
 #include <Windows.h>             // Windows API (MessageBox)
 
 using namespace CameraLibrary;
+
+// ========== 전역 변수: 호모그래피를 위한 점 선택 ==========
+std::vector<cv::Point2f> selectedPoints;  // 사용자가 선택한 4개의 점
+const int REQUIRED_POINTS = 4;            // 필요한 점의 개수
+bool homographyReady = false;              // 호모그래피 준비 완료 여부
+cv::Mat homographyMatrix;                  // 호모그래피 변환 행렬
+int frameWidthGlobal = 0;                  // 프레임 너비 (마우스 콜백에서 사용)
+
+// ========== 마우스 콜백 함수 ==========
+// 사용자가 마우스로 클릭한 점을 저장
+// 왼쪽 영상(grayscale)에서만 클릭을 인식
+void onMouse(int event, int x, int y, int flags, void* userdata)
+{
+    if (event == cv::EVENT_LBUTTONDOWN)
+    {
+        // 왼쪽 영상 영역인지 확인 (합쳐진 이미지의 왼쪽 절반)
+        if (x < frameWidthGlobal && selectedPoints.size() < REQUIRED_POINTS)
+        {
+            // 클릭한 점 저장
+            selectedPoints.push_back(cv::Point2f(x, y));
+            std::cout << "Point " << selectedPoints.size() << " selected: ("
+                      << x << ", " << y << ")" << std::endl;
+
+            // 4개 점이 모두 선택되면 호모그래피 계산
+            if (selectedPoints.size() == REQUIRED_POINTS)
+            {
+                std::cout << "All 4 points selected. Calculating homography..." << std::endl;
+
+                // 목표 좌표: 1024x768 사각형의 네 모서리
+                // lefttop, righttop, rightbottom, leftbottom 순서
+                std::vector<cv::Point2f> dstPoints;
+                dstPoints.push_back(cv::Point2f(0, 0));           // lefttop
+                dstPoints.push_back(cv::Point2f(1023, 0));        // righttop
+                dstPoints.push_back(cv::Point2f(1023, 767));      // rightbottom
+                dstPoints.push_back(cv::Point2f(0, 767));         // leftbottom
+
+                // 호모그래피 변환 행렬 계산
+                homographyMatrix = cv::getPerspectiveTransform(selectedPoints, dstPoints);
+                homographyReady = true;
+
+                std::cout << "Homography matrix calculated. Warped view ready." << std::endl;
+            }
+        }
+    }
+}
 
 int main(int argc, char* argv[])
 {
@@ -178,14 +224,23 @@ int main(int argc, char* argv[])
     std::string windowName = "OptiTrack Flex 13 - IR View";
     cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE);
 
+    // 마우스 콜백 함수 등록
+    cv::setMouseCallback(windowName, onMouse, nullptr);
+
     // 프레임 크기 저장
     int frameWidth = camera->Width();
     int frameHeight = camera->Height();
+    frameWidthGlobal = frameWidth;  // 전역 변수에 저장 (마우스 콜백에서 사용)
 
     // ========== 모션 감지 변수 ==========
     // 이전 프레임의 중심점들을 저장하여 움직임 감지
     std::vector<cv::Point> previousCenters;
     const int MOTION_THRESHOLD = 10;  // 10픽셀 이상 움직여야 "움직이는 객체"로 판단
+
+    std::cout << "Instructions:" << std::endl;
+    std::cout << "1. Click 4 points on the LEFT image in order: lefttop, righttop, rightbottom, leftbottom" << std::endl;
+    std::cout << "2. After selecting 4 points, a warped 1024x768 view will appear in a new window" << std::endl;
+    std::cout << "3. Press 'q' to quit" << std::endl;
 
     // ========== 메인 루프 ==========
     bool running = true;
@@ -232,8 +287,8 @@ int main(int argc, char* argv[])
 
                 // ===== 표시용 컬러 이미지 생성 =====
                 // Grayscale 이미지를 BGR 컬러 이미지로 변환 (색상 표시를 위해)
-                cv::Mat dilatedDisplay, binaryDisplay;
-                cv::cvtColor(dilatedFrame, dilatedDisplay, cv::COLOR_GRAY2BGR);
+                cv::Mat grayDisplay, binaryDisplay;
+                cv::cvtColor(grayFrame, grayDisplay, cv::COLOR_GRAY2BGR);
                 cv::cvtColor(binaryFrame, binaryDisplay, cv::COLOR_GRAY2BGR);
 
                 // ===== 중심점 계산 및 표시 =====
@@ -293,14 +348,58 @@ int main(int argc, char* argv[])
                 // 다음 프레임의 움직임 감지를 위해 현재 중심점들 저장
                 previousCenters = currentCenters;
 
+                // ===== 선택된 점 표시 =====
+                // 사용자가 클릭한 점들을 grayscale 이미지에 표시
+                for (size_t i = 0; i < selectedPoints.size(); i++)
+                {
+                    // 점 그리기 (파란색 원)
+                    cv::circle(grayDisplay, selectedPoints[i], 8, cv::Scalar(255, 0, 0), -1);
+
+                    // 점 번호 표시
+                    std::string label = std::to_string(i + 1);
+                    cv::putText(grayDisplay, label,
+                                cv::Point(selectedPoints[i].x + 10, selectedPoints[i].y - 10),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 0), 2);
+                }
+
+                // 점들을 선으로 연결
+                if (selectedPoints.size() >= 2)
+                {
+                    for (size_t i = 0; i < selectedPoints.size() - 1; i++)
+                    {
+                        cv::line(grayDisplay, selectedPoints[i], selectedPoints[i + 1],
+                                 cv::Scalar(0, 255, 255), 2);
+                    }
+
+                    // 4개 점이 모두 선택되면 사각형 완성
+                    if (selectedPoints.size() == 4)
+                    {
+                        cv::line(grayDisplay, selectedPoints[3], selectedPoints[0],
+                                 cv::Scalar(0, 255, 255), 2);
+                    }
+                }
+
                 // ===== 이미지 합성 =====
-                // 왼쪽: Dilate 적용 후 grayscale 영상
+                // 왼쪽: Grayscale 원본 영상 (선택된 점 표시)
                 // 오른쪽: 이진화 후 움직이는 객체 표시
                 cv::Mat combined;
-                cv::hconcat(dilatedDisplay, binaryDisplay, combined);
+                cv::hconcat(grayDisplay, binaryDisplay, combined);
 
                 // ===== 화면에 표시 =====
                 cv::imshow(windowName, combined);
+
+                // ===== 호모그래피 변환 및 표시 =====
+                // 4개 점이 모두 선택되면 호모그래피 변환 적용
+                if (homographyReady)
+                {
+                    // 원본 grayscale 이미지에 호모그래피 변환 적용
+                    cv::Mat warpedImage;
+                    cv::warpPerspective(grayFrame, warpedImage, homographyMatrix,
+                                        cv::Size(1024, 768));
+
+                    // 새 창에 표시
+                    cv::imshow("Warped View (1024x768)", warpedImage);
+                }
             }
         }
 
@@ -310,6 +409,12 @@ int main(int argc, char* argv[])
         if (key == 'q' || key == 'Q' || key == 27) // 'q', 'Q', 또는 ESC 키
         {
             running = false;
+        }
+        else if (key == 'r' || key == 'R') // 'r' 키: 선택 초기화
+        {
+            selectedPoints.clear();
+            homographyReady = false;
+            std::cout << "Point selection reset." << std::endl;
         }
 
         // ===== CPU 사용률 제한 =====
