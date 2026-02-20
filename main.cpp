@@ -203,9 +203,9 @@ int main(int argc, char* argv[])
     // 노출(Exposure) 설정
     // 값이 클수록 더 밝은 영상, 작을수록 어두운 영상
     // 범위: 일반적으로 1~480 (카메라 모델에 따라 다름)
-    std::cout << "Setting exposure to 2000..." << std::endl;
-    camera->SetExposure(2000);
-    std::cout << "Exposure set to 2000." << std::endl;
+    std::cout << "Setting exposure to 3000..." << std::endl;
+    camera->SetExposure(3000);
+    std::cout << "Exposure set to 3000." << std::endl;
 
     // IR LED 조명 비활성화 (intensity를 0으로 설정)
     // 외부 IR 광원만 사용하여 순수한 IR 반사 영상 획득
