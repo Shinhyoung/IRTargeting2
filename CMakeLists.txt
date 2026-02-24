@@ -38,6 +38,7 @@ file(GLOB OPENCV_LIBS "${OPENCV_LIB_DIR}/opencv_world*.lib")
 target_link_libraries(IRViewer
     CameraLibrary2019x64S.lib
     ${OPENCV_LIBS}
+    Ws2_32.lib   # Windows Sockets 2 (UDP 통신)
 )
 
 # Copy Camera SDK DLL to output directory after build
@@ -64,6 +65,26 @@ set_target_properties(IRViewer PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
 )
+
+# ===== UDP Receiver (테스트용 수신 프로그램) =====
+add_executable(UDPReceiver udp_receiver.cpp)
+target_link_libraries(UDPReceiver
+    ${OPENCV_LIBS}
+    Ws2_32.lib
+)
+set_target_properties(UDPReceiver PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG   "${CMAKE_BINARY_DIR}/Debug"
+)
+# OpenCV DLL 복사 (Release 디렉토리에 이미 있으므로 중복 시 덮어쓰기)
+if(OPENCV_DLLS)
+    add_custom_command(TARGET UDPReceiver POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${OPENCV_DLLS}
+            $<TARGET_FILE_DIR:UDPReceiver>
+        COMMENT "Copying OpenCV DLLs for UDPReceiver"
+    )
+endif()
 
 # Print configuration info
 message(STATUS "Camera SDK: ${CAMERA_SDK_PATH}")

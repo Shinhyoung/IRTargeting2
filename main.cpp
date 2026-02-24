@@ -11,6 +11,13 @@
  * - OpenCV를 사용한 실시간 영상 표시 및 시각화
  */
 
+// Winsock2는 반드시 Windows.h 이전에 포함해야 함
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>            // UDP 소켓 (Windows Sockets 2)
+#include <ws2tcpip.h>            // inet_pton 등 IP 변환 함수
+
 #include <cstdint>
 #include "cameralibrary.h"      // OptiTrack Camera SDK 헤더
 #include <opencv2/opencv.hpp>   // OpenCV 라이브러리 (영상 처리 및 표시)
@@ -23,47 +30,89 @@
 
 using namespace CameraLibrary;
 
+// ========== UDP 통신 설정 ==========
+const char* UDP_TARGET_IP   = "127.0.0.1"; // Unreal Engine 수신 IP (같은 PC: 127.0.0.1, 다른 PC: 해당 IP)
+const int   UDP_TARGET_PORT = 7777;         // Unreal Engine 수신 포트
+
 // ========== 전역 변수: 호모그래피를 위한 점 선택 ==========
-std::vector<cv::Point2f> selectedPoints;  // 사용자가 선택한 4개의 점
-const int REQUIRED_POINTS = 4;            // 필요한 점의 개수
-bool homographyReady = false;              // 호모그래피 준비 완료 여부
-cv::Mat homographyMatrix;                  // 호모그래피 변환 행렬
-int frameWidthGlobal = 0;                  // 프레임 너비 (마우스 콜백에서 사용)
+std::vector<cv::Point2f> selectedPoints;    // 사용자가 선택한 4개의 점
+const int REQUIRED_POINTS = 4;              // 필요한 점의 개수
+bool homographyReady = false;               // 호모그래피 준비 완료 여부
+cv::Mat homographyMatrix;                   // 호모그래피 변환 행렬
+
+// ========== 마우스 콜백용 데이터 구조체 ==========
+// 창 리사이징 시 클릭 좌표를 실제 영상 픽셀 좌표로 역변환하기 위해 사용
+struct MouseCallbackData
+{
+    std::string windowName;
+    int         frameWidth;   // 카메라 실제 해상도 너비
+    int         frameHeight;  // 카메라 실제 해상도 높이
+};
+
+// ========== UDP 전송용 최신 좌표 ==========
+// 's' 키 입력 시 전송할 좌표 (호모그래피가 준비되면 변환 좌표, 아니면 원본 카메라 좌표)
+std::vector<cv::Point2f> latestSendCenters;
 
 // ========== 마우스 콜백 함수 ==========
-// 사용자가 마우스로 클릭한 점을 저장
-// 왼쪽 영상(grayscale)에서만 클릭을 인식
+// Win32 GetClientRect + 레터박스 직접 계산으로 정확한 좌표 변환
 void onMouse(int event, int x, int y, int flags, void* userdata)
 {
-    if (event == cv::EVENT_LBUTTONDOWN)
+    if (event != cv::EVENT_LBUTTONDOWN) return;
+
+    MouseCallbackData* md = static_cast<MouseCallbackData*>(userdata);
+
+    // Win32 API로 창 핸들 및 클라이언트 크기 직접 측정
+    // FindWindowA: OpenCV namedWindow 제목 = windowName 과 일치
+    HWND hwnd = FindWindowA(NULL, md->windowName.c_str());
+    if (!hwnd) return;
+
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int clientW = rc.right;
+    int clientH = rc.bottom;
+    if (clientW <= 0 || clientH <= 0) return;
+
+    // combined 이미지 논리 크기
+    int imgW = md->frameWidth * 2;
+    int imgH = md->frameHeight;
+
+    // WINDOW_NORMAL (keepratio): 비율 유지 레터박스 직접 계산
+    float scaleX = static_cast<float>(clientW) / imgW;
+    float scaleY = static_cast<float>(clientH) / imgH;
+    float scale  = std::min(scaleX, scaleY);
+
+    int dispW = static_cast<int>(imgW * scale);
+    int dispH = static_cast<int>(imgH * scale);
+    int offX  = (clientW - dispW) / 2;
+    int offY  = (clientH - dispH) / 2;
+
+    // 레터박스 내 로컬 좌표로 변환
+    int localX = x - offX;
+    int localY = y - offY;
+    if (localX < 0 || localY < 0 || localX >= dispW || localY >= dispH) return;
+
+    // 표시 좌표 → 실제 영상 픽셀 좌표
+    float imgX = static_cast<float>(localX) / dispW * imgW;
+    float imgY = static_cast<float>(localY) / dispH * imgH;
+
+    // 왼쪽 영상(grayscale) 영역에서만 클릭 인식
+    if (imgX < md->frameWidth && static_cast<int>(selectedPoints.size()) < REQUIRED_POINTS)
     {
-        // 왼쪽 영상 영역인지 확인 (합쳐진 이미지의 왼쪽 절반)
-        if (x < frameWidthGlobal && selectedPoints.size() < REQUIRED_POINTS)
+        selectedPoints.push_back(cv::Point2f(imgX, imgY));
+        std::cout << "Point " << selectedPoints.size() << " selected (actual): ("
+                  << static_cast<int>(imgX) << ", " << static_cast<int>(imgY) << ")" << std::endl;
+
+        if (static_cast<int>(selectedPoints.size()) == REQUIRED_POINTS)
         {
-            // 클릭한 점 저장
-            selectedPoints.push_back(cv::Point2f(x, y));
-            std::cout << "Point " << selectedPoints.size() << " selected: ("
-                      << x << ", " << y << ")" << std::endl;
+            std::cout << "All 4 points selected. Calculating homography..." << std::endl;
 
-            // 4개 점이 모두 선택되면 호모그래피 계산
-            if (selectedPoints.size() == REQUIRED_POINTS)
-            {
-                std::cout << "All 4 points selected. Calculating homography..." << std::endl;
+            std::vector<cv::Point2f> dstPoints = {
+                {0.f, 0.f}, {1023.f, 0.f}, {1023.f, 767.f}, {0.f, 767.f}
+            };
+            homographyMatrix = cv::getPerspectiveTransform(selectedPoints, dstPoints);
+            homographyReady  = true;
 
-                // 목표 좌표: 1024x768 사각형의 네 모서리
-                // lefttop, righttop, rightbottom, leftbottom 순서
-                std::vector<cv::Point2f> dstPoints;
-                dstPoints.push_back(cv::Point2f(0, 0));           // lefttop
-                dstPoints.push_back(cv::Point2f(1023, 0));        // righttop
-                dstPoints.push_back(cv::Point2f(1023, 767));      // rightbottom
-                dstPoints.push_back(cv::Point2f(0, 767));         // leftbottom
-
-                // 호모그래피 변환 행렬 계산
-                homographyMatrix = cv::getPerspectiveTransform(selectedPoints, dstPoints);
-                homographyReady = true;
-
-                std::cout << "Homography matrix calculated. Warped view ready." << std::endl;
-            }
+            std::cout << "Homography matrix calculated. Warped view ready." << std::endl;
         }
     }
 }
@@ -220,17 +269,20 @@ int main(int argc, char* argv[])
     std::cout << "Camera started. Press 'q' to quit." << std::endl;
 
     // ========== OpenCV 윈도우 생성 ==========
-    // 영상 표시를 위한 OpenCV 윈도우 생성
-    std::string windowName = "OptiTrack Flex 13 - IR View";
-    cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE);
-
-    // 마우스 콜백 함수 등록
-    cv::setMouseCallback(windowName, onMouse, nullptr);
-
-    // 프레임 크기 저장
-    int frameWidth = camera->Width();
+    int frameWidth  = camera->Width();
     int frameHeight = camera->Height();
-    frameWidthGlobal = frameWidth;  // 전역 변수에 저장 (마우스 콜백에서 사용)
+
+    std::string windowName = "OptiTrack Flex 13 - IR View";
+    // WINDOW_GUI_NORMAL: 툴바 없음 → 클라이언트 영역 = 순수 이미지 영역 (마우스 좌표 정확도 향상)
+    cv::namedWindow(windowName, cv::WINDOW_NORMAL | cv::WINDOW_GUI_NORMAL);
+    cv::resizeWindow(windowName, frameWidth * 2, frameHeight); // 초기 크기 = 실제 해상도
+
+    // 마우스 콜백 등록 (struct로 창 이름과 프레임 크기 전달)
+    static MouseCallbackData mouseData;
+    mouseData.windowName  = windowName;
+    mouseData.frameWidth  = frameWidth;
+    mouseData.frameHeight = frameHeight;
+    cv::setMouseCallback(windowName, onMouse, &mouseData);
 
     // ========== 모션 감지 변수 (주석 처리) ==========
     // 이전 프레임의 중심점들을 저장하여 움직임 감지
@@ -242,8 +294,36 @@ int main(int argc, char* argv[])
     std::cout << "2. After selecting 4 points, a warped 1024x768 view will appear in a new window" << std::endl;
     std::cout << "3. Press 'q' to quit" << std::endl;
 
+    // ========== UDP 소켓 초기화 ==========
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+    {
+        std::cerr << "WSAStartup failed. Error: " << WSAGetLastError() << std::endl;
+        CameraManager::X().Shutdown();
+        return -1;
+    }
+
+    SOCKET udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (udpSocket == INVALID_SOCKET)
+    {
+        std::cerr << "UDP socket creation failed. Error: " << WSAGetLastError() << std::endl;
+        WSACleanup();
+        CameraManager::X().Shutdown();
+        return -1;
+    }
+
+    sockaddr_in udpAddr;
+    memset(&udpAddr, 0, sizeof(udpAddr));
+    udpAddr.sin_family = AF_INET;
+    udpAddr.sin_port   = htons(UDP_TARGET_PORT);
+    inet_pton(AF_INET, UDP_TARGET_IP, &udpAddr.sin_addr);
+
+    std::cout << "UDP socket ready. Target: " << UDP_TARGET_IP << ":" << std::dec << UDP_TARGET_PORT << std::endl;
+    std::cout << "Press 's' to send current detected coordinates via UDP." << std::endl;
+
     // ========== 메인 루프 ==========
-    bool running = true;
+    bool running        = true;
+    bool continuousSend = false; // 'c' 키로 토글: 매 프레임 자동 UDP 전송
     while (running)
     {
         // ===== 프레임 획득 =====
@@ -356,6 +436,10 @@ int main(int argc, char* argv[])
                 // 다음 프레임의 움직임 감지를 위해 현재 중심점들 저장
                 // previousCenters = currentCenters;  // 모션 감지 비활성화로 주석 처리
 
+                // ===== UDP 전송용 최신 좌표 업데이트 (기본: 원본 카메라 좌표) =====
+                // 호모그래피가 준비되면 아래 블록에서 변환 좌표로 덮어씀
+                latestSendCenters = detectedCenters;
+
                 // ===== 선택된 점 표시 =====
                 // 사용자가 클릭한 점들을 grayscale 이미지에 표시
                 for (size_t i = 0; i < selectedPoints.size(); i++)
@@ -388,58 +472,129 @@ int main(int argc, char* argv[])
                 }
 
                 // ===== 이미지 합성 =====
-                // 왼쪽: Grayscale 원본 영상 (선택된 점 표시)
-                // 오른쪽: 이진화 후 움직이는 객체 표시
-                cv::Mat combined;
-                cv::hconcat(grayDisplay, binaryDisplay, combined);
-
-                // ===== 화면에 표시 =====
-                cv::imshow(windowName, combined);
-
-                // ===== 호모그래피 변환 및 표시 =====
-                // 4개 점이 모두 선택되면 호모그래피 변환 적용
+                // 호모그래피 준비 전: 오른쪽 = Binary Threshold
+                // 호모그래피 준비 후: 오른쪽 = Warped View (1024x768 → 패널 크기로 스케일)
+                cv::Mat rightPanel;
                 if (homographyReady)
                 {
-                    // 원본 grayscale 이미지에 호모그래피 변환 적용
+                    // 호모그래피 변환 적용 (1024x768 공간)
                     cv::Mat warpedImage;
                     cv::warpPerspective(grayFrame, warpedImage, homographyMatrix,
                                         cv::Size(1024, 768));
-
-                    // Warped 이미지를 컬러로 변환 (점과 텍스트 표시를 위해)
                     cv::Mat warpedColor;
                     cv::cvtColor(warpedImage, warpedColor, cv::COLOR_GRAY2BGR);
 
-                    // 검출된 중심점들을 호모그래피 변환
+                    // 변환된 중심점 표시 (좌표 값은 항상 1024x768 기준)
                     if (!detectedCenters.empty())
                     {
                         std::vector<cv::Point2f> transformedCenters;
                         cv::perspectiveTransform(detectedCenters, transformedCenters, homographyMatrix);
+                        latestSendCenters = transformedCenters;
 
-                        // 변환된 좌표를 warped 이미지에 표시
                         for (size_t i = 0; i < transformedCenters.size(); i++)
                         {
-                            // 변환된 좌표가 이미지 범위 내에 있는지 확인
                             if (transformedCenters[i].x >= 0 && transformedCenters[i].x < 1024 &&
                                 transformedCenters[i].y >= 0 && transformedCenters[i].y < 768)
                             {
-                                // 중심점에 빨간색 원 그리기
                                 cv::circle(warpedColor, transformedCenters[i], 5, cv::Scalar(0, 0, 255), -1);
-
-                                // 좌표 텍스트를 초록색으로 표시
                                 int tx = static_cast<int>(transformedCenters[i].x);
                                 int ty = static_cast<int>(transformedCenters[i].y);
                                 std::string coordText = "(" + std::to_string(tx) + "," + std::to_string(ty) + ")";
-                                cv::putText(warpedColor, coordText,
-                                            cv::Point(tx + 10, ty - 5),
+                                cv::putText(warpedColor, coordText, cv::Point(tx + 10, ty - 5),
                                             cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 255, 0), 1);
                             }
                         }
                     }
 
-                    // 새 창에 표시 (좌표가 표시된 컬러 이미지)
-                    cv::imshow("Warped View (1024x768)", warpedColor);
+                    // 오른쪽 패널 크기를 왼쪽(grayDisplay)에 맞춰 스케일
+                    cv::resize(warpedColor, rightPanel, cv::Size(frameWidth, frameHeight));
                 }
+                else
+                {
+                    rightPanel = binaryDisplay;
+                }
+
+                cv::Mat combined;
+                cv::hconcat(grayDisplay, rightPanel, combined);
+
+                // ===== OSD: 좌측 상단 단축키 안내 오버레이 =====
+                {
+                    int boxH = (!selectedPoints.empty() && !homographyReady) ? 100 : 82;
+                    cv::Mat overlay = combined.clone();
+                    cv::rectangle(overlay, cv::Point(4, 4), cv::Point(248, boxH),
+                                  cv::Scalar(15, 15, 15), cv::FILLED);
+                    cv::addWeighted(overlay, 0.65, combined, 0.35, 0, combined);
+
+                    auto putKey = [&](const std::string& t, cv::Scalar color, int y)
+                    {
+                        cv::putText(combined, t, cv::Point(10, y),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                                    cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+                        cv::putText(combined, t, cv::Point(10, y),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.42,
+                                    color, 1, cv::LINE_AA);
+                    };
+
+                    std::string sendLabel = std::string("[S] UDP: ") +
+                                            (continuousSend ? "ON  (Sending)" : "OFF");
+                    cv::Scalar sendColor  = continuousSend
+                                           ? cv::Scalar(60, 255, 60)
+                                           : cv::Scalar(120, 200, 255);
+
+                    putKey("[Q/ESC] Quit",                   cv::Scalar(200,200,200), 22);
+                    putKey(sendLabel,                         sendColor,               40);
+                    putKey("[R] Reset Corner Points",         cv::Scalar(200,200,200), 58);
+                    putKey("[L-Click] Select Corner (4pts)", cv::Scalar(200,200,200), 76);
+
+                    if (!selectedPoints.empty() && !homographyReady)
+                    {
+                        putKey("  -> " + std::to_string(selectedPoints.size()) + "/4 pts selected",
+                               cv::Scalar(255, 190, 60), 94);
+                    }
+                }
+
+                // ===== OSD: 하단 상태 표시 =====
+                {
+                    std::string statusStr = continuousSend ? "● UDP SENDING" : "○ UDP STOPPED";
+                    cv::Scalar statusColor = continuousSend
+                                            ? cv::Scalar(60, 255, 60)
+                                            : cv::Scalar(120, 120, 120);
+                    cv::putText(combined, statusStr,
+                                cv::Point(8, combined.rows - 8),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.50, statusColor, 1, cv::LINE_AA);
+
+                    if (!latestSendCenters.empty())
+                    {
+                        std::string ptStr = "Detected: " + std::to_string(latestSendCenters.size()) + " pt(s)";
+                        cv::putText(combined, ptStr,
+                                    cv::Point(combined.cols - 190, combined.rows - 8),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.50, cv::Scalar(0, 220, 220), 1, cv::LINE_AA);
+                    }
+                }
+
+                // ===== 메인 창에 표시 (리사이징 가능) =====
+                cv::imshow(windowName, combined);
             }
+        }
+
+        // ===== 실시간 연속 전송 (Real-time Send Mode) =====
+        // 's' 키로 ON/OFF 토글, 매 프레임 latestSendCenters를 UDP로 전송
+        if (continuousSend && !latestSendCenters.empty())
+        {
+            std::string msg;
+            for (size_t i = 0; i < latestSendCenters.size(); i++)
+            {
+                if (i > 0) msg += ";";
+                msg += std::to_string(static_cast<int>(latestSendCenters[i].x))
+                     + ","
+                     + std::to_string(static_cast<int>(latestSendCenters[i].y));
+            }
+            sendto(udpSocket,
+                   msg.c_str(),
+                   static_cast<int>(msg.length()),
+                   0,
+                   reinterpret_cast<sockaddr*>(&udpAddr),
+                   sizeof(udpAddr));
         }
 
         // ===== 키 입력 처리 =====
@@ -455,6 +610,11 @@ int main(int argc, char* argv[])
             homographyReady = false;
             std::cout << "Point selection reset." << std::endl;
         }
+        else if (key == 's' || key == 'S') // 's' 키: 실시간 연속 전송 ON/OFF 토글
+        {
+            continuousSend = !continuousSend;
+            std::cout << "[UDP] Real-time send: " << (continuousSend ? "ON" : "OFF") << std::endl;
+        }
 
         // ===== CPU 사용률 제한 =====
         // 10ms 대기하여 과도한 CPU 사용 방지
@@ -464,6 +624,10 @@ int main(int argc, char* argv[])
     // ========== 정리 및 종료 ==========
     // OpenCV 윈도우 닫기
     cv::destroyAllWindows();
+
+    // UDP 소켓 정리
+    closesocket(udpSocket);
+    WSACleanup();
 
     // Camera SDK 종료 및 리소스 해제
     CameraManager::X().Shutdown();
