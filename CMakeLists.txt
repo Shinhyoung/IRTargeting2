@@ -30,7 +30,14 @@ link_directories(
 )
 
 # Create executable
-add_executable(IRViewer main.cpp)
+add_executable(IRViewer
+    main.cpp
+    settings.cpp
+    homography.cpp
+    udp_sender.cpp
+    frame_processor.cpp
+    osd_renderer.cpp
+)
 
 # Link libraries
 # Use static library for Camera SDK
