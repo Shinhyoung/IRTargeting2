@@ -222,8 +222,13 @@ IRViewer에서 **S 키**로 전송을 시작하면 실시간으로 좌표를 시
 
 ```
 IRTargeting2/
-├── main.cpp              # IRViewer 메인 소스
-├── udp_receiver.cpp      # UDP 수신 테스트 프로그램
+├── main.cpp              # 진입점: 카메라 초기화 + 메인 루프 (~175줄)
+├── settings.h/.cpp       # AppSettings 구조체 + Win32 설정 다이얼로그
+├── homography.h/.cpp     # HomographyState 구조체 + 마우스 콜백 (onMouse)
+├── udp_sender.h/.cpp     # UDPSender 클래스 (소켓 생성/전송/소멸)
+├── frame_processor.h/.cpp# 영상 처리 파이프라인 (Dilate→Threshold→Contour→Warp)
+├── osd_renderer.h/.cpp   # OSD 렌더링 (단축키 안내 + 상태 표시)
+├── udp_receiver.cpp      # UDP 수신 테스트 프로그램 (독립 실행)
 ├── CMakeLists.txt        # CMake 빌드 설정
 ├── README.md             # 이 문서
 ├── CLAUDE.md             # 프로젝트 요구사항
@@ -274,4 +279,4 @@ set(OPENCV_PATH     "C:/opencv/opencv/build")
 ---
 
 **마지막 업데이트**: 2026-02-26
-**버전**: 2.0.0
+**버전**: 2.1.0 (모듈화 리팩토링)
