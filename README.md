@@ -264,6 +264,11 @@ set(OPENCV_PATH     "C:/opencv/opencv/build")
 2. 왼쪽 영상에서 **4개 코너 포인트** 선택 완료 여부 확인
 3. **P 키** → 설정 창에서 IP/Port 확인
 
+### 4점 선택 시 포인트가 클릭한 위치와 다른 곳에 표시됨
+저해상도 노트북 또는 Windows DPI 스케일링(125%, 150%)이 설정된 환경에서 발생.
+v2.1.1에서 수정됨 — `WINDOW_AUTOSIZE` 모드에서 `GetClientRect` 기반 letterbox 변환 제거,
+OpenCV mouse callback의 좌표를 이미지 좌표로 직접 사용하도록 변경.
+
 ---
 
 ## 기술 스택
@@ -278,5 +283,5 @@ set(OPENCV_PATH     "C:/opencv/opencv/build")
 
 ---
 
-**마지막 업데이트**: 2026-02-26
-**버전**: 2.1.0 (모듈화 리팩토링)
+**마지막 업데이트**: 2026-02-27
+**버전**: 2.1.1 (마우스 좌표 버그 수정)
