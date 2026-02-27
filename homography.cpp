@@ -1,11 +1,5 @@
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-
 #include "homography.h"
 #include <iostream>
-#include <algorithm>
 
 void onMouse(int event, int x, int y, int flags, void* userdata)
 {
@@ -14,34 +8,17 @@ void onMouse(int event, int x, int y, int flags, void* userdata)
     MouseCallbackData* md = static_cast<MouseCallbackData*>(userdata);
     HomographyState*   hs = md->state;
 
-    HWND hwnd = FindWindowA(NULL, md->windowName.c_str());
-    if (!hwnd) return;
-
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    int clientW = rc.right;
-    int clientH = rc.bottom;
-    if (clientW <= 0 || clientH <= 0) return;
-
     int imgW = md->frameWidth * 2;
     int imgH = md->frameHeight;
 
-    // WINDOW_AUTOSIZE 기준: scale=1, offset=0 이지만 범용 letterbox 계산 유지
-    float scaleX = static_cast<float>(clientW) / imgW;
-    float scaleY = static_cast<float>(clientH) / imgH;
-    float scale  = std::min(scaleX, scaleY);
+    // WINDOW_AUTOSIZE: OpenCV mouse callback은 이미 이미지 좌표를 반환함 (1:1).
+    // GetClientRect + letterbox 변환은 WINDOW_NORMAL(리사이징 가능 창)용이며,
+    // WINDOW_AUTOSIZE에서 사용하면 저해상도 화면/DPI 스케일링 환경에서
+    // GetClientRect가 클리핑된 크기를 반환해 좌표가 잘못 변환되는 버그가 발생.
+    if (x < 0 || y < 0 || x >= imgW || y >= imgH) return;
 
-    int dispW = static_cast<int>(imgW * scale);
-    int dispH = static_cast<int>(imgH * scale);
-    int offX  = (clientW - dispW) / 2;
-    int offY  = (clientH - dispH) / 2;
-
-    int localX = x - offX;
-    int localY = y - offY;
-    if (localX < 0 || localY < 0 || localX >= dispW || localY >= dispH) return;
-
-    float imgX = static_cast<float>(localX) / dispW * imgW;
-    float imgY = static_cast<float>(localY) / dispH * imgH;
+    float imgX = static_cast<float>(x);
+    float imgY = static_cast<float>(y);
 
     // 좌측 이미지(원본)에서만 점 선택
     if (imgX < md->frameWidth &&
