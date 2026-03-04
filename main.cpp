@@ -160,6 +160,21 @@ int main(int argc, char* argv[])
     std::string windowName = "OptiTrack Flex 13 - IR View";
     cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE | cv::WINDOW_GUI_NORMAL);
 
+    // X 버튼 제거: 시스템 메뉴에서 SC_CLOSE 항목 삭제
+    cv::waitKey(1); // 윈도우 핸들 생성 대기
+    {
+        HWND hwnd = FindWindowA(nullptr, windowName.c_str());
+        if (hwnd)
+        {
+            HMENU hSysMenu = GetSystemMenu(hwnd, FALSE);
+            if (hSysMenu)
+            {
+                DeleteMenu(hSysMenu, SC_CLOSE, MF_BYCOMMAND);
+                DrawMenuBar(hwnd);
+            }
+        }
+    }
+
     HomographyState hom;
 
     // conf/setting.cfg 에 저장된 4개 코너가 있으면 호모그래피 즉시 복원
@@ -220,10 +235,12 @@ int main(int argc, char* argv[])
     bool showConfigSaved = false;
     auto configSavedTime = std::chrono::steady_clock::time_point{};
 
+    int displayCounter = 0;
     while (running)
     {
         std::shared_ptr<const Frame> frame = camera->LatestFrame();
 
+        bool doDisplay = false;
         if (frame && frame->IsGrayscale())
         {
             const unsigned char* data = frame->GrayscaleData(*camera);
@@ -234,39 +251,42 @@ int main(int argc, char* argv[])
                 // 전송 대상 좌표 갱신
                 latestSendCenters = hom.ready ? r.inBoundCenters : std::vector<cv::Point2f>{};
 
-                // 좌우 패널 합성
-                cv::Mat combined;
-                cv::hconcat(r.leftPanel, r.rightPanel, combined);
+                // ===== UDP 즉시 전송: waitKey 대기 없이 새 프레임마다 바로 전송 =====
+                if (continuousSend && hom.ready && !latestSendCenters.empty())
+                    sender.send(latestSendCenters);
 
-                // OSD 렌더링
-                // 저장 확인 메시지 타이머 체크 (2초 후 소멸)
-                if (showConfigSaved)
+                // ===== 디스플레이 쓰로틀: 4프레임마다 1회 표시 (~30fps) =====
+                if (++displayCounter % 4 == 0)
                 {
-                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - configSavedTime).count();
-                    if (ms > 2000) showConfigSaved = false;
+                    // 저장 확인 메시지 타이머 체크 (2초 후 소멸)
+                    if (showConfigSaved)
+                    {
+                        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - configSavedTime).count();
+                        if (ms > 2000) showConfigSaved = false;
+                    }
+
+                    cv::Mat combined;
+                    cv::hconcat(r.leftPanel, r.rightPanel, combined);
+
+                    OSDState osd;
+                    osd.continuousSend     = continuousSend;
+                    osd.homographyReady    = hom.ready;
+                    osd.selectedPointCount = static_cast<int>(hom.selectedPoints.size());
+                    osd.displayCount       = hom.ready
+                                            ? static_cast<int>(r.inBoundCenters.size())
+                                            : static_cast<int>(r.detectedCenters.size());
+                    osd.configSaved        = showConfigSaved;
+                    renderOSD(combined, osd);
+
+                    cv::imshow(windowName, combined);
+                    doDisplay = true;
                 }
-
-                OSDState osd;
-                osd.continuousSend    = continuousSend;
-                osd.homographyReady   = hom.ready;
-                osd.selectedPointCount = static_cast<int>(hom.selectedPoints.size());
-                osd.displayCount      = hom.ready
-                                       ? static_cast<int>(r.inBoundCenters.size())
-                                       : static_cast<int>(r.detectedCenters.size());
-                osd.configSaved       = showConfigSaved;
-                renderOSD(combined, osd);
-
-                cv::imshow(windowName, combined);
             }
         }
 
-        // ===== 연속 UDP 전송 (호모그래피 설정 완료 후에만) =====
-        if (continuousSend && hom.ready && !latestSendCenters.empty())
-            sender.send(latestSendCenters);
-
-        // ===== 키 입력 처리 =====
-        int key = cv::waitKey(1);
+        // ===== 키 입력 처리: 표시 프레임엔 waitKey(1), 아니면 pollKey() (논블로킹) =====
+        int key = doDisplay ? cv::waitKey(1) : cv::pollKey();
 
         if (key == 'q' || key == 'Q' || key == 27)
         {
