@@ -17,14 +17,14 @@ void renderOSD(cv::Mat& image, const OSDState& state)
     // ===== 상단 OSD: 단축키 안내 =====
     {
         bool showProgress = (state.selectedPointCount > 0 && !state.homographyReady);
-        int  boxH         = showProgress ? 120 : 102;
+        int  boxH         = showProgress ? 138 : 120;
 
         cv::Mat overlay = image.clone();
         cv::rectangle(overlay, cv::Point(4, 4), cv::Point(252, boxH),
                       cv::Scalar(15, 15, 15), cv::FILLED);
         cv::addWeighted(overlay, 0.65, image, 0.35, 0, image);
 
-        std::string sendLabel = std::string("[S] UDP: ") +
+        std::string sendLabel = std::string("[U] UDP: ") +
                                 (state.continuousSend ? "ON  (Sending)" : "OFF");
         cv::Scalar sendColor  = state.continuousSend
                                ? cv::Scalar(60, 255, 60)
@@ -34,12 +34,13 @@ void renderOSD(cv::Mat& image, const OSDState& state)
         putKey(image, sendLabel,                         sendColor,               40);
         putKey(image, "[R] Reset Corner Points",         cv::Scalar(200,200,200), 58);
         putKey(image, "[P] Settings",                    cv::Scalar(200,200,200), 76);
-        putKey(image, "[L-Click] Select Corner (4pts)",  cv::Scalar(200,200,200), 94);
+        putKey(image, "[S] Save Config",                 cv::Scalar(200,200,200), 94);
+        putKey(image, "[L-Click] Select Corner (4pts)",  cv::Scalar(200,200,200), 112);
 
         if (showProgress)
             putKey(image,
                    "  -> " + std::to_string(state.selectedPointCount) + "/4 pts selected",
-                   cv::Scalar(255, 190, 60), 112);
+                   cv::Scalar(255, 190, 60), 130);
     }
 
     // ===== 하단 OSD: 전송 상태 및 검출 포인트 수 =====
@@ -59,5 +60,16 @@ void renderOSD(cv::Mat& image, const OSDState& state)
                         cv::Point(image.cols - 190, image.rows - 8),
                         cv::FONT_HERSHEY_SIMPLEX, 0.50, cv::Scalar(0, 220, 220), 1, cv::LINE_AA);
         }
+    }
+
+    // ===== 중앙 상단: 설정 저장 확인 메시지 (2초간 표시) =====
+    if (state.configSaved)
+    {
+        const std::string msg = "Config Saved!";
+        int textX = image.cols / 2 - 80;
+        cv::putText(image, msg, cv::Point(textX + 1, 36),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 0), 3, cv::LINE_AA);
+        cv::putText(image, msg, cv::Point(textX, 35),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(80, 255, 160), 2, cv::LINE_AA);
     }
 }

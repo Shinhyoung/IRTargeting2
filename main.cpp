@@ -21,6 +21,7 @@
 #include "udp_sender.h"
 #include "frame_processor.h"
 #include "osd_renderer.h"
+#include "config_manager.h"
 
 #include <cstdint>
 #include "cameralibrary.h"
@@ -51,9 +52,13 @@ int main(int argc, char* argv[])
     std::cout << "Log started at: "
               << std::chrono::system_clock::now().time_since_epoch().count() << std::endl;
 
-    // ========== 시작 설정 다이얼로그 ==========
+    // ========== 설정 로드 (conf/setting.cfg) 또는 시작 다이얼로그 ==========
     AppSettings settings;
-    ShowSettingsDialog(settings); // Cancel이면 기본값 유지
+    std::vector<cv::Point2f> configCorners;
+    bool configLoaded = loadConfig(settings, configCorners);
+    if (!configLoaded)
+        ShowSettingsDialog(settings); // 설정 파일이 없을 때만 다이얼로그 표시
+
     std::cout << "Settings applied: IP=" << settings.ipAddress
               << " Port=" << settings.port
               << " TargetW=" << settings.targetWidth
@@ -156,6 +161,20 @@ int main(int argc, char* argv[])
     cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE | cv::WINDOW_GUI_NORMAL);
 
     HomographyState hom;
+
+    // conf/setting.cfg 에 저장된 4개 코너가 있으면 호모그래피 즉시 복원
+    if (configLoaded &&
+        static_cast<int>(configCorners.size()) == HomographyState::REQUIRED_POINTS)
+    {
+        hom.selectedPoints = configCorners;
+        float tw = static_cast<float>(settings.targetWidth  - 1);
+        float th = static_cast<float>(settings.targetHeight - 1);
+        std::vector<cv::Point2f> dst = { {0.f,0.f},{tw,0.f},{tw,th},{0.f,th} };
+        hom.matrix = cv::getPerspectiveTransform(hom.selectedPoints, dst);
+        hom.ready  = true;
+        std::cout << "[Config] Homography restored from saved corners." << std::endl;
+    }
+
     static MouseCallbackData mouseData;
     mouseData.windowName   = windowName;
     mouseData.frameWidth   = frameWidth;
@@ -190,8 +209,16 @@ int main(int argc, char* argv[])
 
     // ========== 메인 루프 ==========
     bool running        = true;
-    bool continuousSend = false;
+    // 설정 파일에서 4점이 복원됐으면 UDP 스트리밍 자동 시작
+    bool continuousSend = (configLoaded && hom.ready);
+    if (continuousSend)
+        std::cout << "[Config] Auto-started UDP streaming." << std::endl;
+
     std::vector<cv::Point2f> latestSendCenters; // 마지막으로 검출된 전송 대상 좌표
+
+    // K키 저장 확인 메시지용 타이머
+    bool showConfigSaved = false;
+    auto configSavedTime = std::chrono::steady_clock::time_point{};
 
     while (running)
     {
@@ -212,6 +239,14 @@ int main(int argc, char* argv[])
                 cv::hconcat(r.leftPanel, r.rightPanel, combined);
 
                 // OSD 렌더링
+                // 저장 확인 메시지 타이머 체크 (2초 후 소멸)
+                if (showConfigSaved)
+                {
+                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - configSavedTime).count();
+                    if (ms > 2000) showConfigSaved = false;
+                }
+
                 OSDState osd;
                 osd.continuousSend    = continuousSend;
                 osd.homographyReady   = hom.ready;
@@ -219,6 +254,7 @@ int main(int argc, char* argv[])
                 osd.displayCount      = hom.ready
                                        ? static_cast<int>(r.inBoundCenters.size())
                                        : static_cast<int>(r.detectedCenters.size());
+                osd.configSaved       = showConfigSaved;
                 renderOSD(combined, osd);
 
                 cv::imshow(windowName, combined);
@@ -242,10 +278,18 @@ int main(int argc, char* argv[])
             latestSendCenters.clear();
             std::cout << "Point selection reset." << std::endl;
         }
-        else if (key == 's' || key == 'S')
+        else if (key == 'u' || key == 'U')
         {
             continuousSend = !continuousSend;
             std::cout << "[UDP] Real-time send: " << (continuousSend ? "ON" : "OFF") << std::endl;
+        }
+        else if (key == 's' || key == 'S')
+        {
+            if (saveConfig(settings, hom.selectedPoints))
+            {
+                showConfigSaved = true;
+                configSavedTime = std::chrono::steady_clock::now();
+            }
         }
         else if (key == 'p' || key == 'P')
         {

@@ -135,5 +135,14 @@ FrameResult processFrame(
         result.rightPanel = binaryDisplay;
     }
 
+    // 오른쪽 패널 왼쪽 상단: 타겟 해상도 표시
+    {
+        std::string resText = std::to_string(settings.targetWidth) + " x " + std::to_string(settings.targetHeight);
+        cv::putText(result.rightPanel, resText, cv::Point(11, 26),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+        cv::putText(result.rightPanel, resText, cv::Point(10, 25),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 220, 220), 1, cv::LINE_AA);
+    }
+
     return result;
 }

@@ -37,6 +37,7 @@ add_executable(IRViewer
     udp_sender.cpp
     frame_processor.cpp
     osd_renderer.cpp
+    config_manager.cpp
 )
 
 # Link libraries
