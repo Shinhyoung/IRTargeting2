@@ -46,6 +46,8 @@ void renderOSD(cv::Mat& image, const OSDState& state)
     // ===== 하단 OSD: 전송 상태 및 검출 포인트 수 =====
     {
         std::string statusStr  = state.continuousSend ? "● UDP SENDING" : "○ UDP STOPPED";
+        if (state.continuousSend && state.udpActualFps > 0)
+            statusStr += "  " + std::to_string(state.udpActualFps) + " fps";
         cv::Scalar  statusColor = state.continuousSend
                                  ? cv::Scalar(60, 255, 60)
                                  : cv::Scalar(120, 120, 120);

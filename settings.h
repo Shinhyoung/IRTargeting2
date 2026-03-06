@@ -18,6 +18,7 @@ struct AppSettings
     int  targetWidth;
     int  targetHeight;
     int  exposure;
+    int  udpFps;
 
     AppSettings()
     {
@@ -26,6 +27,7 @@ struct AppSettings
         targetWidth  = 1024;
         targetHeight = 768;
         exposure     = 7500;
+        udpFps       = 60;
     }
 };
 

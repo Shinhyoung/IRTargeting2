@@ -47,6 +47,7 @@ target_link_libraries(IRViewer
     CameraLibrary2019x64S.lib
     ${OPENCV_LIBS}
     Ws2_32.lib   # Windows Sockets 2 (UDP 통신)
+    winmm.lib    # timeBeginPeriod/timeEndPeriod (고해상도 타이머)
 )
 
 # Copy Camera SDK DLL to output directory after build

@@ -44,6 +44,7 @@ bool saveConfig(const AppSettings& settings, const std::vector<cv::Point2f>& cor
     f << "target_width="  << settings.targetWidth  << "\n";
     f << "target_height=" << settings.targetHeight << "\n";
     f << "exposure="      << settings.exposure     << "\n";
+    f << "udp_fps="       << settings.udpFps       << "\n";
     f << "corner_count="  << corners.size()        << "\n";
 
     for (size_t i = 0; i < corners.size(); i++)
@@ -86,6 +87,7 @@ bool loadConfig(AppSettings& settings, std::vector<cv::Point2f>& corners)
             else if (key == "target_width")  { int w = std::stoi(val); if (w > 0) settings.targetWidth  = w; }
             else if (key == "target_height") { int h = std::stoi(val); if (h > 0) settings.targetHeight = h; }
             else if (key == "exposure")      { int e = std::stoi(val); settings.exposure = std::max(0, std::min(7500, e)); }
+            else if (key == "udp_fps")       { int f2 = std::stoi(val); settings.udpFps = std::max(1, std::min(1000, f2)); }
             else if (key == "corner_count")  { cornerCount = std::stoi(val); }
             else if (key.size() > 7 && key.substr(0, 6) == "corner")
             {
@@ -117,6 +119,7 @@ bool loadConfig(AppSettings& settings, std::vector<cv::Point2f>& corners)
               << "  Port=" << settings.port
               << "  " << settings.targetWidth << "x" << settings.targetHeight
               << "  Exposure=" << settings.exposure
+              << "  UDP_FPS=" << settings.udpFps
               << "  Corners=" << corners.size() << std::endl;
     return true;
 }

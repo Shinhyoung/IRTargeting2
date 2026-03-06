@@ -30,11 +30,16 @@
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 
 using namespace CameraLibrary;
 
 int main(int argc, char* argv[])
 {
+    // ========== Windows 타이머 해상도를 1ms로 설정 ==========
+    timeBeginPeriod(1);
+
     // ========== 로그 파일 설정 ==========
     std::ofstream logFile("IRViewer_log.txt");
     auto cout_buf = std::cout.rdbuf(logFile.rdbuf());
@@ -96,6 +101,7 @@ int main(int argc, char* argv[])
     {
         std::cout << "Camera " << i << ": " << list[i].Name() << std::endl;
         std::cout << "  UID: " << list[i].UID() << std::endl;
+        std::cout << std::dec; // UID() sets std::hex internally; reset to decimal
         std::cout << "  Initial State: " << list[i].State() << std::endl;
     }
 
@@ -220,14 +226,17 @@ int main(int argc, char* argv[])
         return -1;
     }
     std::cout << "UDP socket ready. Target: " << settings.ipAddress << ":" << settings.port << std::endl;
-    std::cout << "Press 's' to send current detected coordinates via UDP." << std::endl;
+    std::cout << "Press 'u' to toggle UDP send thread." << std::endl;
 
     // ========== 메인 루프 ==========
     bool running        = true;
     // 설정 파일에서 4점이 복원됐으면 UDP 스트리밍 자동 시작
     bool continuousSend = (configLoaded && hom.ready);
     if (continuousSend)
-        std::cout << "[Config] Auto-started UDP streaming." << std::endl;
+    {
+        sender.startThread(settings.udpFps);
+        std::cout << "[Config] Auto-started UDP streaming at " << settings.udpFps << " FPS." << std::endl;
+    }
 
     std::vector<cv::Point2f> latestSendCenters; // 마지막으로 검출된 전송 대상 좌표
 
@@ -251,9 +260,9 @@ int main(int argc, char* argv[])
                 // 전송 대상 좌표 갱신
                 latestSendCenters = hom.ready ? r.inBoundCenters : std::vector<cv::Point2f>{};
 
-                // ===== UDP 즉시 전송: waitKey 대기 없이 새 프레임마다 바로 전송 =====
-                if (continuousSend && hom.ready && !latestSendCenters.empty())
-                    sender.send(latestSendCenters);
+                // ===== 최신 좌표를 전송 스레드에 전달 =====
+                if (continuousSend && hom.ready)
+                    sender.updatePoints(latestSendCenters);
 
                 // ===== 디스플레이 쓰로틀: 4프레임마다 1회 표시 (~30fps) =====
                 if (++displayCounter % 4 == 0)
@@ -277,6 +286,7 @@ int main(int argc, char* argv[])
                                             ? static_cast<int>(r.inBoundCenters.size())
                                             : static_cast<int>(r.detectedCenters.size());
                     osd.configSaved        = showConfigSaved;
+                    osd.udpActualFps       = sender.actualFps();
                     renderOSD(combined, osd);
 
                     cv::imshow(windowName, combined);
@@ -301,7 +311,10 @@ int main(int argc, char* argv[])
         else if (key == 'u' || key == 'U')
         {
             continuousSend = !continuousSend;
-            std::cout << "[UDP] Real-time send: " << (continuousSend ? "ON" : "OFF") << std::endl;
+            if (continuousSend)
+                sender.startThread(settings.udpFps);
+            else
+                sender.stopThread();
         }
         else if (key == 's' || key == 'S')
         {
@@ -326,6 +339,10 @@ int main(int argc, char* argv[])
                 {
                     sender.updateTarget(settings.ipAddress, settings.port);
                 }
+                if (settings.udpFps != prev.udpFps)
+                {
+                    sender.setFps(settings.udpFps);
+                }
                 if (settings.targetWidth  != prev.targetWidth ||
                     settings.targetHeight != prev.targetHeight)
                 {
@@ -342,11 +359,13 @@ int main(int argc, char* argv[])
     }
 
     // ========== 정리 및 종료 ==========
+    sender.stopThread();
     cv::destroyAllWindows();
     WSACleanup();
     CameraManager::X().Shutdown();
 
     std::cout << "Program terminated successfully." << std::endl;
     restoreLog();
+    timeEndPeriod(1);
     return 0;
 }
